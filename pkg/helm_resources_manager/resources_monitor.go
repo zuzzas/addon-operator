@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	log2 "github.com/flant/addon-operator/pkg/log"
 	log "github.com/sirupsen/logrus"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,30 +22,29 @@ import (
 const monitorDelay = time.Second * 5
 
 type ResourcesMonitor struct {
-	ctx context.Context
+	ctx    context.Context
 	cancel context.CancelFunc
 	paused bool
 
-	moduleName string
-	manifests []manifest.Manifest
+	moduleName       string
+	manifests        []manifest.Manifest
 	defaultNamespace string
 
 	kubeClient kube.KubernetesClient
-	logLabels map[string]string
-
+	logLabels  map[string]string
 
 	absentCb func(moduleName string, absent []manifest.Manifest, defaultNs string)
 }
 
 func NewResourcesMonitor() *ResourcesMonitor {
 	return &ResourcesMonitor{
-		paused: false,
+		paused:    false,
 		logLabels: make(map[string]string, 0),
 		manifests: make([]manifest.Manifest, 0),
 	}
 }
 
-func (r* ResourcesMonitor) WithContext(ctx context.Context) {
+func (r *ResourcesMonitor) WithContext(ctx context.Context) {
 	r.ctx, r.cancel = context.WithCancel(ctx)
 }
 
@@ -99,7 +99,7 @@ func (r *ResourcesMonitor) Start() {
 				}
 
 				if len(absent) > 0 {
-					logEntry.Debug("Absent resources detected",)
+					logEntry.Debug("Absent resources detected")
 					if r.absentCb != nil {
 						r.absentCb(r.moduleName, absent, r.defaultNamespace)
 					}
@@ -131,7 +131,12 @@ func (r *ResourcesMonitor) AbsentResources() ([]manifest.Manifest, error) {
 	for _, m := range r.manifests {
 		// Get GVR
 		//log.Debugf("%s: discover GVR for apiVersion '%s' kind '%s'...", ei.Monitor.Metadata.DebugName, ei.Monitor.ApiVersion, ei.Monitor.Kind)
-		apiRes, err := r.kubeClient.APIResource(m.ApiVersion(), m.Kind())
+		//apiRes, err := r.kubeClient.APIResource(m.ApiVersion(), m.Kind())
+		var apiRes v1.APIResource
+		var err error
+		log2.MeasureTimeToLog(func() {
+			apiRes, err = r.kubeClient.APIResource(m.ApiVersion(), m.Kind())
+		}, fmt.Sprintf("kubeClient.APIResource apiVer=%s kind=%s", m.ApiVersion(), m.Kind()), nil)
 		if err != nil {
 			//log.Errorf("%s: Cannot get GroupVersionResource info for apiVersion '%s' kind '%s' from api-server. Possibly CRD is not created before informers are started. Error was: %v", ei.Monitor.Metadata.DebugName, ei.Monitor.ApiVersion, ei.Monitor.Kind, err)
 			return nil, err
@@ -139,8 +144,8 @@ func (r *ResourcesMonitor) AbsentResources() ([]manifest.Manifest, error) {
 		//log.Debugf("%s: GVR for kind '%s' is '%s'", ei.Monitor.Metadata.DebugName, ei.Monitor.Kind, ei.GroupVersionResource.String())
 
 		gvr := schema.GroupVersionResource{
-			Group: apiRes.Group,
-			Version: apiRes.Version,
+			Group:    apiRes.Group,
+			Version:  apiRes.Version,
 			Resource: apiRes.Name,
 		}
 		// Resources are filtered by metadata.name field. Object is considered absent if list is empty.
@@ -152,10 +157,26 @@ func (r *ResourcesMonitor) AbsentResources() ([]manifest.Manifest, error) {
 
 		if apiRes.Namespaced {
 			ns := m.Namespace(r.defaultNamespace)
-			objList, err = r.kubeClient.Dynamic().Resource(gvr).Namespace(ns).List(listOptions)
+			log2.MeasureTimeToLog(func() {
+				objList, err = r.kubeClient.Dynamic().Resource(gvr).Namespace(ns).List(listOptions)
+			}, fmt.Sprintf("Dynamic Namespaced List of %s", gvr.String()), nil)
 		} else {
-			objList, err = r.kubeClient.Dynamic().Resource(gvr).List(listOptions)
+			log2.MeasureTimeToLog(func() {
+				objList, err = r.kubeClient.Dynamic().Resource(gvr).List(listOptions)
+			}, fmt.Sprintf("Dynamic List of %s", gvr.String()), nil)
 		}
+
+		if apiRes.Namespaced {
+			ns := m.Namespace(r.defaultNamespace)
+			log2.MeasureTimeToLog(func() {
+				_, err = r.kubeClient.Dynamic().Resource(gvr).Namespace(ns).Get(m.Name(), v1.GetOptions{})
+			}, fmt.Sprintf("Dynamic Namespaced Get of %s", gvr.String()), nil)
+		} else {
+			log2.MeasureTimeToLog(func() {
+				_, err = r.kubeClient.Dynamic().Resource(gvr).Get(m.Name(), v1.GetOptions{})
+			}, fmt.Sprintf("Dynamic Get of %s", gvr.String()), nil)
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("Fetch list for helm resource %s: %s", m.Id(), err)
 		}
