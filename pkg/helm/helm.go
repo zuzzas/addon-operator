@@ -14,10 +14,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kblabels "k8s.io/apimachinery/pkg/labels"
 
-	"github.com/flant/addon-operator/pkg/app"
-	"github.com/flant/addon-operator/pkg/utils"
 	"github.com/flant/shell-operator/pkg/executor"
 	"github.com/flant/shell-operator/pkg/kube"
+
+	"github.com/flant/addon-operator/pkg/app"
+	log2 "github.com/flant/addon-operator/pkg/log"
+	"github.com/flant/addon-operator/pkg/utils"
 )
 
 const HelmPath = "helm"
@@ -61,19 +63,19 @@ var Client HelmClient
 
 type helmClient struct {
 	KubeClient kube.KubernetesClient
-	LogEntry *log.Entry
+	LogEntry   *log.Entry
 }
 
 var _ HelmClient = &helmClient{}
 
-var NewClient = func(logLabels ... map[string]string) HelmClient {
+var NewClient = func(logLabels ...map[string]string) HelmClient {
 	logEntry := log.WithField("operator.component", "helm")
 	if len(logLabels) > 0 {
 		logEntry = logEntry.WithFields(utils.LabelsToLogFields(logLabels[0]))
 	}
 
 	return &helmClient{
-		LogEntry: logEntry,
+		LogEntry:   logEntry,
 		KubeClient: clientFactoryInstance().KubeClient,
 	}
 }
@@ -105,7 +107,11 @@ func (h *helmClient) Cmd(args ...string) (stdout string, stderr string, err erro
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
-	err = executor.Run(cmd)
+	//err = executor.Run(cmd)
+	log2.MeasureTimeToLog(func() {
+		err = executor.Run(cmd)
+	}, fmt.Sprint("executor.Run %s", cmd.String()), nil)
+
 	stdout = strings.TrimSpace(stdoutBuf.String())
 	stderr = strings.TrimSpace(stderrBuf.String())
 

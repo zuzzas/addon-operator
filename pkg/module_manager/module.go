@@ -215,14 +215,22 @@ func (m *Module) runHelmInstall(logLabels map[string]string) error {
 	}
 	checksum := utils.CalculateStringsChecksum(renderedManifests)
 
-	manifests, err := manifest.GetManifestListFromYamlDocuments(renderedManifests)
+	//manifests, err := manifest.GetManifestListFromYamlDocuments(renderedManifests)
+	var manifests []manifest.Manifest
+	log2.MeasureTimeToLog(func() {
+		manifests, err = manifest.GetManifestListFromYamlDocuments(renderedManifests)
+	}, "GetManifestListFromYamlDocuments", logLabels)
 	if err != nil {
 		return err
 	}
 	m.LastReleaseManifests = manifests
 
 	// Skip upgrades if nothing is changes
-	runUpgradeRelease, err := m.ShouldRunHelmUpgrade(helmClient, helmReleaseName, checksum, manifests, logLabels)
+	//runUpgradeRelease, err := m.ShouldRunHelmUpgrade(helmClient, helmReleaseName, checksum, manifests, logLabels)
+	var runUpgradeRelease bool
+	log2.MeasureTimeToLog(func() {
+		runUpgradeRelease, err = m.ShouldRunHelmUpgrade(helmClient, helmReleaseName, checksum, manifests, logLabels)
+	}, "m.ShouldRunHelmUpgrade", logLabels)
 	if err != nil {
 		return err
 	}
@@ -260,8 +268,18 @@ func (m *Module) runHelmInstall(logLabels map[string]string) error {
 
 func (m *Module) ShouldRunHelmUpgrade(helmClient helm.HelmClient, releaseName string, checksum string, manifests []manifest.Manifest, logLabels map[string]string) (bool, error) {
 	logEntry := log.WithFields(utils.LabelsToLogFields(logLabels))
+	/*
+		log2.MeasureTimeToLog(func() {
+			runUpgradeRelease, err = m.ShouldRunHelmUpgrade(helmClient, helmReleaseName, checksum, manifests, logLabels)
+		}, "m.ShouldRunHelmUpgrade", logLabels)
+	*/
 
-	isReleaseExists, err := helmClient.IsReleaseExists(releaseName)
+	//isReleaseExists, err := helmClient.IsReleaseExists(releaseName)
+	var isReleaseExists bool
+	var err error
+	log2.MeasureTimeToLog(func() {
+		isReleaseExists, err = helmClient.IsReleaseExists(releaseName)
+	}, "IsReleaseExists", logLabels)
 	if err != nil {
 		return false, err
 	}
@@ -272,7 +290,11 @@ func (m *Module) ShouldRunHelmUpgrade(helmClient helm.HelmClient, releaseName st
 		return true, nil
 	}
 
-	_, status, err := helmClient.LastReleaseStatus(releaseName)
+	//_, status, err := helmClient.LastReleaseStatus(releaseName)
+	var status string
+	log2.MeasureTimeToLog(func() {
+		_, status, err = helmClient.LastReleaseStatus(releaseName)
+	}, "IsReleaseExists", logLabels)
 	if err != nil {
 		return false, err
 	}
@@ -284,7 +306,11 @@ func (m *Module) ShouldRunHelmUpgrade(helmClient helm.HelmClient, releaseName st
 	}
 
 	// Get values for a non failed release.
-	releaseValues, err := helmClient.GetReleaseValues(releaseName)
+	//releaseValues, err := helmClient.GetReleaseValues(releaseName)
+	var releaseValues utils.Values
+	log2.MeasureTimeToLog(func() {
+		releaseValues, err = helmClient.GetReleaseValues(releaseName)
+	}, "GetReleaseValues", logLabels)
 	if err != nil {
 		return false, err
 	}
@@ -306,7 +332,11 @@ func (m *Module) ShouldRunHelmUpgrade(helmClient helm.HelmClient, releaseName st
 	}
 
 	// Check if there are absent resources
-	absent, err := m.moduleManager.HelmResourcesManager.GetAbsentResources(manifests, app.Namespace)
+	//absent, err := m.moduleManager.HelmResourcesManager.GetAbsentResources(manifests, app.Namespace)
+	var absent []manifest.Manifest
+	log2.MeasureTimeToLog(func() {
+		absent, err = m.moduleManager.HelmResourcesManager.GetAbsentResources(manifests, app.Namespace)
+	}, "GetAbsentResources", logLabels)
 	if err != nil {
 		return false, err
 	}
