@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	log2 "github.com/flant/addon-operator/pkg/log"
 	"github.com/flant/shell-operator/pkg/utils/manifest"
 	"github.com/kennygrant/sanitize"
 	log "github.com/sirupsen/logrus"
@@ -27,12 +28,12 @@ import (
 )
 
 type Module struct {
-	Name          string
-	Path          string
+	Name string
+	Path string
 	// module values from modules/values.yaml file
 	CommonStaticConfig *utils.ModuleConfig
 	// module values from modules/<module name>/values.yaml
-	StaticConfig  *utils.ModuleConfig
+	StaticConfig *utils.ModuleConfig
 
 	LastReleaseManifests []manifest.Manifest
 
@@ -59,7 +60,7 @@ func (m *Module) SafeName() string {
 func (m *Module) Run(onStartup bool, logLabels map[string]string, afterStartupCb func() error) (bool, error) {
 	logLabels = utils.MergeLabels(logLabels, map[string]string{
 		"module": m.Name,
-		"queue": "main",
+		"queue":  "main",
 	})
 
 	if err := m.cleanup(); err != nil {
@@ -79,15 +80,34 @@ func (m *Module) Run(onStartup bool, logLabels map[string]string, afterStartupCb
 		}
 	}
 
-	if err := m.runHooksByBinding(BeforeHelm, logLabels); err != nil {
+	var err error
+	log2.MeasureTimeToLog(func() {
+		err = m.runHooksByBinding(BeforeHelm, logLabels)
+	}, "runHooksByBinding BeforeHelm", logLabels)
+	if err != nil {
 		return false, err
 	}
 
-	if err := m.runHelmInstall(logLabels); err != nil {
+	log2.MeasureTimeToLog(func() {
+		err = m.runHelmInstall(logLabels)
+	}, "runHelmInstall", logLabels)
+	if err != nil {
 		return false, err
 	}
 
-	valuesChanged, err := m.runHooksByBindingAndCheckValues(AfterHelm, logLabels)
+	//if err := m.runHelmInstall(logLabels); err != nil {
+	//	return false, err
+	//}
+
+	var valuesChanged bool
+	log2.MeasureTimeToLog(func() {
+		valuesChanged, err = m.runHooksByBindingAndCheckValues(AfterHelm, logLabels)
+	}, "runHooksByBinding AfterHelm", logLabels)
+	if err != nil {
+		return false, err
+	}
+
+	//valuesChanged, err := m.runHooksByBindingAndCheckValues(AfterHelm, logLabels)
 	if err != nil {
 		return false, err
 	}
@@ -101,7 +121,7 @@ func (m *Module) Delete(logLabels map[string]string) error {
 	deleteLogLabels := utils.MergeLabels(logLabels,
 		map[string]string{
 			"module": m.Name,
-			"queue": "main",
+			"queue":  "main",
 		})
 	logEntry := log.WithFields(utils.LabelsToLogFields(deleteLogLabels))
 
@@ -131,7 +151,6 @@ func (m *Module) Delete(logLabels map[string]string) error {
 
 	return m.runHooksByBinding(AfterDeleteHelm, deleteLogLabels)
 }
-
 
 func (m *Module) cleanup() error {
 	chartExists, err := m.checkHelmChart()
@@ -170,16 +189,27 @@ func (m *Module) runHelmInstall(logLabels map[string]string) error {
 
 	helmReleaseName := m.generateHelmReleaseName()
 
-	valuesPath, err := m.prepareValuesYamlFile()
+	//valuesPath, err := m.prepareValuesYamlFile()
+	var valuesPath string
+	//var err error
+	log2.MeasureTimeToLog(func() {
+		valuesPath, err = m.prepareValuesYamlFile()
+	}, "prepareValuesYamlFile", logLabels)
 	if err != nil {
 		return err
 	}
 
 	// Render templates to prevent excess helm runs.
 	helmClient := helm.NewClient(logLabels)
-	renderedManifests, err := helmClient.Render(m.Path, []string{valuesPath},
-		[]string{},
-		app.Namespace)
+	//renderedManifests, err := helmClient.Render(m.Path, []string{valuesPath},
+	//	[]string{},
+	//	app.Namespace)
+	var renderedManifests string
+	log2.MeasureTimeToLog(func() {
+		renderedManifests, err = helmClient.Render(m.Path, []string{valuesPath},
+			[]string{},
+			app.Namespace)
+	}, "helm render", logLabels)
 	if err != nil {
 		return err
 	}
@@ -200,24 +230,30 @@ func (m *Module) runHelmInstall(logLabels map[string]string) error {
 	if !runUpgradeRelease {
 		// Start resources monitor if release is not changed
 		if !m.moduleManager.HelmResourcesManager.HasMonitor(m.Name) {
-			m.moduleManager.HelmResourcesManager.StartMonitor(m.Name, manifests, app.Namespace)
+			log2.MeasureTimeToLog(func() {
+				m.moduleManager.HelmResourcesManager.StartMonitor(m.Name, manifests, app.Namespace)
+			}, "release is not changed, start monitor", logLabels)
 		}
 		return nil
 	}
 
-	err = helmClient.UpgradeRelease(
-		helmReleaseName,
-		m.Path,
-		[]string{valuesPath},
-		[]string{fmt.Sprintf("_addonOperatorModuleChecksum=%s", checksum)},
-		//helm.Client.TillerNamespace(),
-		app.Namespace,
-	)
+	log2.MeasureTimeToLog(func() {
+		err = helmClient.UpgradeRelease(
+			helmReleaseName,
+			m.Path,
+			[]string{valuesPath},
+			[]string{fmt.Sprintf("_addonOperatorModuleChecksum=%s", checksum)},
+			//helm.Client.TillerNamespace(),
+			app.Namespace,
+		)
+	}, "helmClient.UpgradeRelease", logLabels)
 	if err != nil {
 		return err
 	}
 	// Start monitor resources if release was successful
-	m.moduleManager.HelmResourcesManager.StartMonitor(m.Name, manifests, app.Namespace)
+	log2.MeasureTimeToLog(func() {
+		m.moduleManager.HelmResourcesManager.StartMonitor(m.Name, manifests, app.Namespace)
+	}, "Start monitor helm resources", logLabels)
 
 	return nil
 }
@@ -296,15 +332,21 @@ func (m *Module) runHooksByBinding(binding BindingType, logLabels map[string]str
 		bc := BindingContext{
 			Binding: ContextBindingType[binding],
 		}
+
+		log2.MeasureTimeToLog(func() {
+			if binding == BeforeHelm || binding == AfterHelm || binding == AfterDeleteHelm {
+				bc.Snapshots = moduleHook.HookController.KubernetesSnapshots()
+				bc.Metadata.IncludeAllSnapshots = true
+			}
+		}, "Update KubernetesSnapshots", logLabels)
 		// Update kubernetes snapshots just before execute a hook
-		if binding == BeforeHelm || binding == AfterHelm || binding == AfterDeleteHelm {
-			bc.Snapshots = moduleHook.HookController.KubernetesSnapshots()
-			bc.Metadata.IncludeAllSnapshots = true
-		}
 		bc.Metadata.BindingType = binding
 
-
-		err := moduleHook.Run(binding, []BindingContext{bc}, logLabels)
+		//err := moduleHook.Run(binding, []BindingContext{bc}, logLabels)
+		var err error
+		log2.MeasureTimeToLog(func() {
+			err = moduleHook.Run(binding, []BindingContext{bc}, logLabels)
+		}, "moduleHook.Run", logLabels)
 		if err != nil {
 			return err
 		}
@@ -329,15 +371,25 @@ func (m *Module) runHooksByBindingAndCheckValues(binding BindingType, logLabels 
 		bc := BindingContext{
 			Binding: ContextBindingType[binding],
 		}
-		// Update kubernetes snapshots just before execute a hook
-		if binding == BeforeHelm || binding == AfterHelm || binding == AfterDeleteHelm {
-			bc.Snapshots = moduleHook.HookController.KubernetesSnapshots()
-			bc.Metadata.IncludeAllSnapshots = true
-		}
+		log2.MeasureTimeToLog(func() {
+			if binding == BeforeHelm || binding == AfterHelm || binding == AfterDeleteHelm {
+				bc.Snapshots = moduleHook.HookController.KubernetesSnapshots()
+				bc.Metadata.IncludeAllSnapshots = true
+			}
+		}, "Update KubernetesSnapshots", logLabels)
+
+		//// Update kubernetes snapshots just before execute a hook
+		//if binding == BeforeHelm || binding == AfterHelm || binding == AfterDeleteHelm {
+		//	bc.Snapshots = moduleHook.HookController.KubernetesSnapshots()
+		//	bc.Metadata.IncludeAllSnapshots = true
+		//}
 		bc.Metadata.BindingType = binding
 
-
-		err := moduleHook.Run(binding, []BindingContext{bc}, logLabels)
+		//err := moduleHook.Run(binding, []BindingContext{bc}, logLabels)
+		var err error
+		log2.MeasureTimeToLog(func() {
+			err = moduleHook.Run(binding, []BindingContext{bc}, logLabels)
+		}, "moduleHook.Run", logLabels)
 		if err != nil {
 			return false, err
 		}
@@ -354,7 +406,6 @@ func (m *Module) runHooksByBindingAndCheckValues(binding BindingType, logLabels 
 
 	return false, nil
 }
-
 
 // CONFIG_VALUES_PATH
 func (m *Module) prepareConfigValuesJsonFile() (string, error) {
@@ -561,7 +612,7 @@ func (m *Module) checkIsEnabledByScript(precedingEnabledModules []string, logLab
 		logEntry.Errorf("Prepare CONFIG_VALUES_PATH file for '%s': %s", enabledScriptPath, err)
 		return false, err
 	}
-	defer func(){
+	defer func() {
 		if sh_app.DebugKeepTmpFiles == "yes" {
 			return
 		}
@@ -577,7 +628,7 @@ func (m *Module) checkIsEnabledByScript(precedingEnabledModules []string, logLab
 		logEntry.Errorf("Prepare VALUES_PATH file for '%s': %s", enabledScriptPath, err)
 		return false, err
 	}
-	defer func(){
+	defer func() {
 		if sh_app.DebugKeepTmpFiles == "yes" {
 			return
 		}
@@ -593,7 +644,7 @@ func (m *Module) checkIsEnabledByScript(precedingEnabledModules []string, logLab
 		logEntry.Errorf("Prepare MODULE_ENABLED_RESULT file for '%s': %s", enabledScriptPath, err)
 		return false, err
 	}
-	defer func(){
+	defer func() {
 		if sh_app.DebugKeepTmpFiles == "yes" {
 			return
 		}
@@ -735,7 +786,7 @@ func (m *Module) loadStaticValues() (err error) {
 	return nil
 }
 
-func (mm *moduleManager) loadCommonStaticValues() (error) {
+func (mm *moduleManager) loadCommonStaticValues() error {
 	valuesPath := filepath.Join(mm.ModulesDir, "values.yaml")
 	if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
 		log.Debugf("No common static values file: %s", err)

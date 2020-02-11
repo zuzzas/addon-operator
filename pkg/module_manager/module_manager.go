@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/flant/addon-operator/pkg/helm_resources_manager"
+	log2 "github.com/flant/addon-operator/pkg/log"
 	"github.com/flant/shell-operator/pkg/hook/controller"
 	"github.com/flant/shell-operator/pkg/kube"
 	log "github.com/sirupsen/logrus"
@@ -75,17 +76,17 @@ type ModuleManager interface {
 // modules should be enabled, disabled or purged.
 type ModulesState struct {
 	// modules that should be run
-	EnabledModules         []string
+	EnabledModules []string
 	// modules that should be deleted
-	ModulesToDisable       []string
+	ModulesToDisable []string
 	// modules that should be purged
 	ReleasedUnknownModules []string
 	// modules that was disabled and now are enabled
-	NewlyEnabledModules    []string
+	NewlyEnabledModules []string
 }
 
 type moduleManager struct {
-	ctx context.Context
+	ctx    context.Context
 	cancel context.CancelFunc
 
 	ValuesLock sync.Mutex
@@ -97,9 +98,9 @@ type moduleManager struct {
 
 	EventCh chan Event
 
-	KubeClient kube.KubernetesClient
-	kubeEventsManager kube_events_manager.KubeEventsManager
-	scheduleManager   schedule_manager.ScheduleManager
+	KubeClient           kube.KubernetesClient
+	kubeEventsManager    kube_events_manager.KubeEventsManager
+	scheduleManager      schedule_manager.ScheduleManager
 	HelmResourcesManager helm_resources_manager.HelmResourcesManager
 
 	// Index of all modules in modules directory. Key is module name.
@@ -196,7 +197,7 @@ type Event struct {
 // NewMainModuleManager returns new MainModuleManager
 func NewMainModuleManager() *moduleManager {
 	return &moduleManager{
-		EventCh: make(chan Event),
+		EventCh:    make(chan Event),
 		ValuesLock: sync.Mutex{},
 
 		allModulesByName:            make(map[string]*Module),
@@ -255,7 +256,6 @@ func (mm *moduleManager) Stop() {
 		mm.cancel()
 	}
 }
-
 
 // RunModulesEnabledScript runs enable script for each module that is enabled by config.
 // Enable script receives a list of previously enabled modules.
@@ -428,8 +428,8 @@ func (mm *moduleManager) calculateEnabledModulesByConfig(moduleConfigs kube_conf
 		kubeConfig, hasKubeConfig := moduleConfigs[moduleName]
 		if hasKubeConfig {
 			isEnabled := mergeEnabled(module.CommonStaticConfig.IsEnabled,
-			                          module.StaticConfig.IsEnabled,
-			                          kubeConfig.IsEnabled)
+				module.StaticConfig.IsEnabled,
+				kubeConfig.IsEnabled)
 
 			if isEnabled {
 				enabled = append(enabled, moduleName)
@@ -569,7 +569,6 @@ func (mm *moduleManager) Ch() chan Event {
 	return mm.EventCh
 }
 
-
 // DiscoverModulesState handles DiscoverModulesState event: it calculates new arrays of enabled modules,
 // modules that should be disabled and modules that should be purged.
 //
@@ -587,10 +586,10 @@ func (mm *moduleManager) DiscoverModulesState(logLabels map[string]string) (stat
 		mm.enabledModulesInOrder)
 
 	state = &ModulesState{
-		EnabledModules: []string{},
-		ModulesToDisable: []string{},
+		EnabledModules:         []string{},
+		ModulesToDisable:       []string{},
 		ReleasedUnknownModules: []string{},
-		NewlyEnabledModules: []string{},
+		NewlyEnabledModules:    []string{},
 	}
 
 	releasedModules, err := helm.NewClient(discoverLogLabels).ListReleasesNames(nil)
@@ -652,7 +651,7 @@ func (mm *moduleManager) DiscoverModulesState(logLabels map[string]string) (stat
 }
 
 // TODO replace with Module and ModuleShouldExists
-func (mm *moduleManager) GetModule(name string) *Module{
+func (mm *moduleManager) GetModule(name string) *Module {
 	module, exist := mm.allModulesByName[name]
 	if exist {
 		return module
@@ -887,7 +886,7 @@ func (mm *moduleManager) HandleKubeEvent(kubeEvent KubeEvent, createGlobalTaskFn
 		if gh != nil {
 			if gh.HookController.CanHandleKubeEvent(kubeEvent) {
 				gh.HookController.HandleKubeEvent(kubeEvent, func(info controller.BindingExecutionInfo) {
-					if createGlobalTaskFn!= nil {
+					if createGlobalTaskFn != nil {
 						createGlobalTaskFn(gh, info)
 					}
 				})
@@ -895,7 +894,7 @@ func (mm *moduleManager) HandleKubeEvent(kubeEvent KubeEvent, createGlobalTaskFn
 		} else {
 			if mh.HookController.CanHandleKubeEvent(kubeEvent) {
 				mh.HookController.HandleKubeEvent(kubeEvent, func(info controller.BindingExecutionInfo) {
-					if createModuleTaskFn!= nil {
+					if createModuleTaskFn != nil {
 						createModuleTaskFn(m, mh, info)
 					}
 				})
@@ -936,7 +935,6 @@ func (mm *moduleManager) HandleModuleEnableKubernetesBindings(moduleName string,
 		}
 	}
 
-
 	return nil
 }
 
@@ -944,14 +942,26 @@ func (mm *moduleManager) StartModuleHooks(moduleName string) {
 	kubeHooks := mm.GetModuleHooksInOrder(moduleName, OnKubernetesEvent)
 
 	for _, hookName := range kubeHooks {
-		mh := mm.GetModuleHook(hookName)
-		mh.HookController.StartMonitors()
+		var mh *ModuleHook
+		log2.MeasureTimeToLog(func() {
+			mh = mm.GetModuleHook(hookName)
+		}, "GetModuleHook from kubeHooks", map[string]string{"hook": hookName})
+
+		log2.MeasureTimeToLog(func() {
+			mh.HookController.StartMonitors()
+		}, "mh.HookController.StartMonitors()", map[string]string{"hook": hookName})
 	}
 
 	schHooks := mm.GetModuleHooksInOrder(moduleName, Schedule)
 	for _, hookName := range schHooks {
-		mh := mm.GetModuleHook(hookName)
-		mh.HookController.EnableScheduleBindings()
+		var mh *ModuleHook
+		log2.MeasureTimeToLog(func() {
+			mh = mm.GetModuleHook(hookName)
+		}, "GetModuleHook from schedule", map[string]string{"hook": hookName})
+		//mh := mm.GetModuleHook(hookName)
+		log2.MeasureTimeToLog(func() {
+			mh.HookController.EnableScheduleBindings()
+		}, "mh.HookController.StartMonitors()", map[string]string{"hook": hookName})
 	}
 
 	return
@@ -987,7 +997,7 @@ func (mm *moduleManager) HandleScheduleEvent(crontab string, createGlobalTaskFn 
 		if gh != nil {
 			if gh.HookController.CanHandleScheduleEvent(crontab) {
 				gh.HookController.HandleScheduleEvent(crontab, func(info controller.BindingExecutionInfo) {
-					if createGlobalTaskFn!= nil {
+					if createGlobalTaskFn != nil {
 						createGlobalTaskFn(gh, info)
 					}
 				})
@@ -995,7 +1005,7 @@ func (mm *moduleManager) HandleScheduleEvent(crontab string, createGlobalTaskFn 
 		} else {
 			if mh.HookController.CanHandleScheduleEvent(crontab) {
 				mh.HookController.HandleScheduleEvent(crontab, func(info controller.BindingExecutionInfo) {
-					if createModuleTaskFn!= nil {
+					if createModuleTaskFn != nil {
 						createModuleTaskFn(m, mh, info)
 					}
 				})
@@ -1034,7 +1044,7 @@ func (mm *moduleManager) LoopByBinding(binding BindingType, fn func(gh *GlobalHo
 //
 // If all flags are nil, then false is returned — module is disabled by default.
 //
-func mergeEnabled(enabledFlags ... *bool) bool {
+func mergeEnabled(enabledFlags ...*bool) bool {
 	result := false
 	for _, enabled := range enabledFlags {
 		if enabled == nil {

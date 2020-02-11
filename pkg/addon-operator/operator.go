@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	log2 "github.com/flant/addon-operator/pkg/log"
 	"github.com/go-chi/chi"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -654,7 +655,7 @@ func (op *AddonOperator) TaskHandler(t sh_task.Task) queue.TaskResult {
 				}
 			case AfterAll:
 				// values are changed when afterAll hooks are executed
-				if afterChecksum != hm.ValuesChecksum {
+				if hm.LastAfterAllHook && afterChecksum != hm.ValuesChecksum {
 					reloadAll = true
 					eventDescription = "AfterAllHooksChangeGlobalValues"
 				}
@@ -777,7 +778,9 @@ func (op *AddonOperator) TaskHandler(t sh_task.Task) queue.TaskResult {
 					hookLogEntry.Infof("ModuleHookRun success")
 				}
 			}
-			op.ModuleManager.StartModuleHooks(hm.ModuleName)
+			log2.MeasureTimeToLog(func() {
+				op.ModuleManager.StartModuleHooks(hm.ModuleName)
+			}, "op.ModuleManager.StartModuleHooks", t.GetLogLabels())
 			return nil
 		})
 		if err != nil {
